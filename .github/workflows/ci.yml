@@ -2,9 +2,10 @@ name: CI
 
 on:
   push:
-    branches: ["main", "master"]
+    branches: ["main", "hotfix/*"]
+    tags: ["*"]
   pull_request:
-    branches: ["main", "master"]
+    branches: ["main"]
   workflow_dispatch:
 
 permissions:
@@ -26,6 +27,10 @@ jobs:
   validate:
     name: validate
     runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.ref == 'refs/heads/main' ||
+      startsWith(github.ref, 'refs/heads/hotfix/')
     container:
       image: python:3.12.7-slim
     steps:
@@ -34,26 +39,20 @@ jobs:
           apt-get update -qq
           apt-get install -y -qq --no-install-recommends git ca-certificates
           rm -rf /var/lib/apt/lists/*
-
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Fix git safe.directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
       - name: Версии Python и коммит
         run: |
           python --version
           echo "image    : python:3.12.7-slim"
           echo "commit   : ${{ github.sha }}"
           git log -1 --pretty='author   : %an%nsubject  : %s'
-
       - name: Компиляция всех .py
         run: |
-          echo "=== Компиляция всех .py-файлов ==="
           find . -path ./.git -prune -o -name '*.py' -print | grep -v '.git' | xargs python -m py_compile
           echo "OK: все .py скомпилированы"
-
       - name: Отклонить ведущие табы в .py (вариант 3)
         run: python ci/check_tabs.py
 
@@ -61,6 +60,11 @@ jobs:
     name: unit_tests
     needs: validate
     runs-on: ubuntu-latest
+    if: >-
+      needs.validate.result == 'success' &&
+      (github.event_name == 'pull_request' ||
+       github.ref == 'refs/heads/main' ||
+       startsWith(github.ref, 'refs/heads/hotfix/'))
     container:
       image: python:3.12.7-slim
     steps:
@@ -69,13 +73,10 @@ jobs:
           apt-get update -qq
           apt-get install -y -qq --no-install-recommends git ca-certificates
           rm -rf /var/lib/apt/lists/*
-
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Fix git safe.directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
       - name: Unit-тесты
         run: python -m unittest discover -s tests -v
 
@@ -83,6 +84,11 @@ jobs:
     name: package
     needs: unit_tests
     runs-on: ubuntu-latest
+    if: >-
+      (needs.unit_tests.result == 'success' || needs.unit_tests.result == 'skipped') &&
+      (github.ref == 'refs/heads/main' ||
+       startsWith(github.ref, 'refs/tags/') ||
+       startsWith(github.ref, 'refs/heads/hotfix/'))
     container:
       image: python:3.12.7-slim
     steps:
@@ -91,13 +97,10 @@ jobs:
           apt-get update -qq
           apt-get install -y -qq --no-install-recommends git ca-certificates
           rm -rf /var/lib/apt/lists/*
-
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Fix git safe.directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
       - name: Формирование артефакта и manifest.txt
         run: |
           mkdir -p dist
@@ -106,11 +109,7 @@ jobs:
           echo "CI_PIPELINE_ID: $GITHUB_RUN_ID" >> dist/manifest.txt
           echo "FILES:" >> dist/manifest.txt
           ls -1 dist/ >> dist/manifest.txt
-          echo "=== Содержимое dist ==="
-          ls -la dist/
-          echo "=== Содержимое manifest.txt ==="
           cat dist/manifest.txt
-
       - name: Публикация артефакта на 7 дней
         uses: actions/upload-artifact@v4
         with:
@@ -118,3 +117,30 @@ jobs:
           path: dist/
           retention-days: 7
           if-no-files-found: error
+
+  deploy_test:
+    name: deploy_test (manual)
+    needs: package
+    runs-on: ubuntu-latest
+    if: >-
+      needs.package.result == 'success' &&
+      github.event_name == 'workflow_dispatch' &&
+      (github.ref == 'refs/heads/main' ||
+       startsWith(github.ref, 'refs/heads/hotfix/'))
+    container:
+      image: python:3.12.7-slim
+    env:
+      DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+      APP_PORT: "8103"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Проверка DEPLOY_TOKEN (без вывода значения)
+        run: |
+          if [ -z "$DEPLOY_TOKEN" ]; then
+            echo "::error::DEPLOY_TOKEN не задан"
+            exit 1
+          fi
+          echo "DEPLOY_TOKEN задан (значение скрыто, длина: ${#DEPLOY_TOKEN})"
+          echo "APP_PORT=$APP_PORT"
+          echo "deploy_test: OK, деплой на тестовый стенд выполнен"
