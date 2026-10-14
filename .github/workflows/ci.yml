@@ -1,0 +1,124 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+    branches: ["main", "master"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUNBUFFERED: "1"
+
+defaults:
+  run:
+    shell: bash          # в контейнере по умолчанию sh — нам нужен bash
+
+jobs:
+
+  # ───────────────────────────── validate ─────────────────────────────
+  validate:
+    name: validate
+    runs-on: ubuntu-latest
+    container:
+      image: python:3.12.7-slim      # точный тег — по условию задания
+    steps:
+      - name: Install git (в slim-образе его нет, а он нужен actions/checkout)
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends git ca-certificates
+          rm -rf /var/lib/apt/lists/*
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Версии Python и коммит
+        run: |
+          set -euo pipefail
+          python --version
+          python -VV
+          echo "image    : python:3.12.7-slim"
+          echo "commit   : ${{ github.sha }}"
+          echo "branch   : ${{ github.ref_name }}"
+          git log -1 --pretty='author   : %an%nsubject  : %s'
+
+      - name: Компиляция всех .py (падение при синтаксическом дефекте)
+        run: |
+          set -euo pipefail
+          mapfile -d '' -t files < <(find . -path ./.git -prune -o -name '*.py' -print0)
+          echo "Найдено .py-файлов: ${#files[@]}"
+          printf '  %s\n' "${files[@]}"
+          if (( ${#files[@]} == 0 )); then
+            echo "::error::В репозитории нет ни одного .py-файла"
+            exit 1
+          fi
+          python -m py_compile "${files[@]}"
+          echo "OK: все .py скомпилированы, синтаксических ошибок нет"
+
+      - name: Отклонить ведущие табы в .py (вариант 3)
+        run: |
+          set -euo pipefail
+          python ci/check_tabs.py
+
+  # ─────────────────────────────── test ───────────────────────────────
+  test:
+    name: test
+    needs: validate
+    runs-on: ubuntu-latest
+    container:
+      image: python:3.12.7-slim
+    steps:
+      - name: Install git
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends git ca-certificates
+          rm -rf /var/lib/apt/lists/*
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Unit-тесты
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s tests -t . -v
+
+  # ───────────────────────────── package ──────────────────────────────
+  package:
+    name: package
+    needs: test
+    runs-on: ubuntu-latest
+    container:
+      image: python:3.12.7-slim
+    steps:
+      - name: Install git
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends git ca-certificates
+          rm -rf /var/lib/apt/lists/*
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Сборка пакета
+        run: |
+          set -euo pipefail
+          version="$(python -c 'import task_app; print(task_app.__version__)')"
+          mkdir -p dist
+          tar --exclude=__pycache__ -czf "dist/task_app-${version}.tar.gz" \
+              task_app.py README.md tests ci .github
+          ls -l dist
+          sha256sum dist/*.tar.gz
+
+      - name: Публикация артефакта
+        uses: actions/upload-artifact@v4
+        with:
+          name: task_app-dist
+          path: dist/
+          if-no-files-found: error
