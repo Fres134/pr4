@@ -129,12 +129,18 @@ jobs:
        startsWith(github.ref, 'refs/heads/hotfix/'))
     container:
       image: python:3.12.7-slim
+    environment:
+      name: test
+      url: http://localhost:8103/test/tickets
     env:
       DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
       APP_PORT: "8103"
+      ENV_NAME: test
+      ENV_URL: http://localhost:8103/test/tickets
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Проверка DEPLOY_TOKEN (без вывода значения)
         run: |
           if [ -z "$DEPLOY_TOKEN" ]; then
@@ -143,4 +149,31 @@ jobs:
           fi
           echo "DEPLOY_TOKEN задан (значение скрыто, длина: ${#DEPLOY_TOKEN})"
           echo "APP_PORT=$APP_PORT"
-          echo "deploy_test: OK, деплой на тестовый стенд выполнен"
+
+      - name: Скачать артефакт
+        uses: actions/download-artifact@v4
+        with:
+          name: package-artifact-variant-3
+          path: artifact
+
+      - name: Развернуть в deploy/test (рабочая область runner)
+        run: |
+          mkdir -p deploy/test
+          cp -r artifact/. deploy/test/
+          echo "=== deploy/test ==="
+          ls -la deploy/test
+          cat deploy/test/manifest.txt
+
+      - name: Дымовая проверка (создание и чтение тестовой заявки)
+        run: |
+          python ci/smoke_test.py deploy/test
+          echo "=== deployment.txt ==="
+          cat deployment.txt
+
+      - name: Сохранить отчёт deployment.txt
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-report
+          path: deployment.txt
+          retention-days: 7
+          if-no-files-found: error
