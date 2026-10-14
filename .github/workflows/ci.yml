@@ -51,26 +51,25 @@ jobs:
           echo "branch   : ${{ github.ref_name }}"
           git log -1 --pretty='author   : %an%nsubject  : %s'
 
-      - name: Компиляция всех .py (падение при синтаксическом дефекте)
+      - name: Компиляция всех .py
         run: |
           set -euo pipefail
           mapfile -d '' -t files < <(find . -path ./.git -prune -o -name '*.py' -print0)
           echo "Найдено .py-файлов: ${#files[@]}"
-          printf '  %s\n' "${files[@]}"
           if (( ${#files[@]} == 0 )); then
             echo "::error::В репозитории нет ни одного .py-файла"
             exit 1
           fi
           python -m py_compile "${files[@]}"
-          echo "OK: все .py скомпилированы, синтаксических ошибок нет"
+          echo "OK: все .py скомпилированы"
 
       - name: Отклонить ведущие табы в .py (вариант 3)
         run: |
           set -euo pipefail
           python ci/check_tabs.py
 
-  test:
-    name: test
+  unit_tests:
+    name: unit_tests
     needs: validate
     runs-on: ubuntu-latest
     container:
@@ -91,11 +90,11 @@ jobs:
       - name: Unit-тесты
         run: |
           set -euo pipefail
-          python -m unittest discover -s tests -t . -v
+          python -m unittest discover -s tests -v
 
   package:
     name: package
-    needs: test
+    needs: unit_tests
     runs-on: ubuntu-latest
     container:
       image: python:3.12.7-slim

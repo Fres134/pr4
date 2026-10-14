@@ -5,8 +5,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from task_app import expand_leading_tabs, lines_with_leading_tab
+from task_app import expand_leading_tabs, lines_with_leading_tab, Ticket
 
 
 class ExpandLeadingTabsTests(unittest.TestCase):
@@ -31,6 +30,30 @@ class LinesWithLeadingTabTests(unittest.TestCase):
 
     def test_empty_when_clean(self):
         self.assertEqual(lines_with_leading_tab("clean\n    code"), [])
+
+
+class TicketTests(unittest.TestCase):
+    def test_create_ticket_with_valid_priority(self):
+        ticket = Ticket("Bug fix", "high")
+        self.assertEqual(ticket.title, "Bug fix")
+        self.assertEqual(ticket.priority, "high")
+
+    def test_create_ticket_with_low_priority(self):
+        ticket = Ticket("Docs", "low", "Update README")
+        self.assertEqual(ticket.description, "Update README")
+
+    def test_create_ticket_with_critical_priority(self):
+        ticket = Ticket("Server down", "critical")
+        self.assertEqual(ticket.priority, "critical")
+
+    def test_invalid_priority_is_rejected(self):
+        with self.assertRaises(ValueError) as ctx:
+            Ticket("Test", "unknown")
+        self.assertIn("Unknown priority", str(ctx.exception))
+
+    def test_repr(self):
+        ticket = Ticket("Test", "medium")
+        self.assertEqual(repr(ticket), "Ticket('Test', 'medium')")
 
 
 if __name__ == "__main__":
