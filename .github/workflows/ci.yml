@@ -19,18 +19,17 @@ env:
 
 defaults:
   run:
-    shell: bash          # в контейнере по умолчанию sh — нам нужен bash
+    shell: bash
 
 jobs:
 
-  # ───────────────────────────── validate ─────────────────────────────
   validate:
     name: validate
     runs-on: ubuntu-latest
     container:
-      image: python:3.12.7-slim      # точный тег — по условию задания
+      image: python:3.12.7-slim
     steps:
-      - name: Install git (в slim-образе его нет, а он нужен actions/checkout)
+      - name: Install git
         run: |
           apt-get update -qq
           apt-get install -y -qq --no-install-recommends git ca-certificates
@@ -38,6 +37,9 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Fix git safe.directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Версии Python и коммит
         run: |
@@ -67,7 +69,6 @@ jobs:
           set -euo pipefail
           python ci/check_tabs.py
 
-  # ─────────────────────────────── test ───────────────────────────────
   test:
     name: test
     needs: validate
@@ -84,12 +85,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Fix git safe.directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: Unit-тесты
         run: |
           set -euo pipefail
           python -m unittest discover -s tests -t . -v
 
-  # ───────────────────────────── package ──────────────────────────────
   package:
     name: package
     needs: test
@@ -105,6 +108,9 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Fix git safe.directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Сборка пакета
         run: |
