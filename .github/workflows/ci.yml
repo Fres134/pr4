@@ -34,18 +34,87 @@ jobs:
           apt-get update -qq
           apt-get install -y -qq --no-install-recommends git ca-certificates
           rm -rf /var/lib/apt/lists/*
+
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Fix git safe.directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: Версии Python и коммит
         run: |
-          set -euo pipefail
           python --version
           echo "image    : python:3.12.7-slim"
           echo "commit   : ${{ github.sha }}"
           git log -1 --pretty='author   : %an%nsubject  : %s'
+
       - name: Компиляция всех .py
         run: |
-          set -euo pipefail
-          mapfile -d '' -t files < <(find . -path ./.git -prune -o -name '*.py'
+          echo "=== Компиляция всех .py-файлов ==="
+          find . -path ./.git -prune -o -name '*.py' -print | grep -v '.git' | xargs python -m py_compile
+          echo "OK: все .py скомпилированы"
+
+      - name: Отклонить ведущие табы в .py (вариант 3)
+        run: python ci/check_tabs.py
+
+  unit_tests:
+    name: unit_tests
+    needs: validate
+    runs-on: ubuntu-latest
+    container:
+      image: python:3.12.7-slim
+    steps:
+      - name: Install git
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends git ca-certificates
+          rm -rf /var/lib/apt/lists/*
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fix git safe.directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Unit-тесты
+        run: python -m unittest discover -s tests -v
+
+  package:
+    name: package
+    needs: unit_tests
+    runs-on: ubuntu-latest
+    container:
+      image: python:3.12.7-slim
+    steps:
+      - name: Install git
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends git ca-certificates
+          rm -rf /var/lib/apt/lists/*
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fix git safe.directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Формирование артефакта и manifest.txt
+        run: |
+          mkdir -p dist
+          cp tickets.py README.md Dockerfile tickets.csv.example dist/
+          echo "CI_COMMIT_SHA: $GITHUB_SHA" > dist/manifest.txt
+          echo "CI_PIPELINE_ID: $GITHUB_RUN_ID" >> dist/manifest.txt
+          echo "FILES:" >> dist/manifest.txt
+          ls -1 dist/ >> dist/manifest.txt
+          echo "=== Содержимое dist ==="
+          ls -la dist/
+          echo "=== Содержимое manifest.txt ==="
+          cat dist/manifest.txt
+
+      - name: Публикация артефакта на 7 дней
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-artifact-variant-3
+          path: dist/
+          retention-days: 7
+          if-no-files-found: error
